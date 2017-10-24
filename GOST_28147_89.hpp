@@ -8,9 +8,9 @@ class GOST_28147_89 {
 public:
     enum class Method {
         ECB,
-        XOR,
+        CBC,
         CFB,
-        MAC,
+        OFB,
     };
 
     typedef unsigned char byte_t;
@@ -23,22 +23,25 @@ public:
     template<typename T>
     void open(T file);
 
-    template<typename T>
-    void encrypt(Method method, T& os);
-    template<typename T>
-    void decrypt(Method method, T& os);
+    void encrypt(Method method, std::ostream& os);
+    void decrypt(Method method, std::ostream& os);
 
 private:  
     std::array<byte_t, 8> _read();
-    
-    std::string _encrypt(Method method, const std::array<uint32_t, 8> &__key);
-
+    template<typename T, size_t S>
+    T _blockToBits(const std::array<byte_t, S> &block);
+    template<size_t S>
+    std::string _blockToString(const std::array<byte_t, S> &text_block);
+    template<typename T, size_t S>
+    std::array<byte_t, S> _bitsToBlock(const T &bits);
+ 
     uint32_t _f(const std::array<byte_t, 4> &A, const uint32_t &key);
-    std::string _ECB(const std::array<uint32_t, 8> &__key);
-    std::string _XOR(const std::array<uint32_t, 8> &__key);
-    std::string _CFB(const std::array<uint32_t, 8> &__key);
+    std::array<byte_t, 8> _block_cipher(const std::array<uint32_t, 8> &__key, const std::array<byte_t, 8> &text_block);
+    std::string _encrypt(Method method, const std::array<uint32_t, 8> &__key);
 
     std::ifstream _file;
     static const std::array<std::array<byte_t, 16>, 8> _s_blocks;
     static const std::array<uint32_t, 8> _key;
+    static const std::array<byte_t, 8> _initialization_vector;
+    bool _decrypting;
 };
