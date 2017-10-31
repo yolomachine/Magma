@@ -1,4 +1,5 @@
 #include "GOST_28147_89.hpp"
+#include <string>
 
 //  id-GostR3411-94-TestParamSet+DiagCornerSwap
 const std::array<std::array<GOST_28147_89::byte_t, 16>, 8> GOST_28147_89::_s_blocks = {
@@ -10,34 +11,6 @@ const std::array<std::array<GOST_28147_89::byte_t, 16>, 8> GOST_28147_89::_s_blo
     0x4, 0xB, 0xA, 0x0, 0x7, 0x2, 0x1, 0xD, 0x3, 0x6, 0x8, 0x5, 0x9, 0xC, 0xF, 0xE,
     0xD, 0xB, 0x4, 0x1, 0x3, 0xF, 0x5, 0x9, 0x0, 0xA, 0xE, 0x7, 0x6, 0x8, 0x2, 0xC,
     0x3, 0xF, 0xD, 0x0, 0x5, 0x7, 0xA, 0x4, 0x9, 0x2, 0x3, 0xE, 0x6, 0xB, 0x8, 0x4,
-};
-
-const std::array<uint32_t, 8> GOST_28147_89::_key = {
-    0xACEF,
-    0xBACE,
-    0xDBAC,
-    0xFDBA,
-
-    0x0123,
-    0x4567,
-    0x89AB,
-    0xCDEF,
-};
-
-const std::array<GOST_28147_89::byte_t, 8> GOST_28147_89::_initialization_vector = {
-    0xAAAA,
-    0xCCCC,
-    0xBBBB,
-    0xDDDD,
-
-    0x1111,
-    0xFFFF,
-    0x0110,
-    0xEEEE,
-};
-
-GOST_28147_89::GOST_28147_89(const char* filename) {
-    open(filename);
 };
 
 void operator >> (std::basic_istream<char, std::char_traits<char>> &is, GOST_28147_89::vec_byte_t &v) {
@@ -53,6 +26,17 @@ std::array<GOST_28147_89::byte_t, S> operator ^ (std::array<GOST_28147_89::byte_
         result[i] = left[i] ^ right[i];
     return result;
 };
+
+GOST_28147_89::GOST_28147_89(const char* key, const char* iv) {
+    for (size_t i = 0; i < 8; ++i) {
+        uint32_t part = static_cast<uint32_t>(key[4 * i])
+                      + static_cast<uint32_t>(key[4 * i + 1])
+                      + static_cast<uint32_t>(key[4 * i + 2])
+                      + static_cast<uint32_t>(key[4 * i + 3]);
+        _key[i] = part;
+        _initialization_vector[i] = static_cast<byte_t>(iv[i]);
+    };
+}
 
 uint32_t GOST_28147_89::_f(const std::array<byte_t, 4> &A, const uint32_t &key) {
     std::array<byte_t, 8> four_bit_blocks;
@@ -103,23 +87,15 @@ std::array<GOST_28147_89::byte_t, 8> GOST_28147_89::_block_cipher(const std::arr
 
 // Utils
 
-template<typename T>
-void GOST_28147_89::open(T filename) {
-    if (_file.is_open())
-        _file.close();
-    _file.open(filename, std::ios::binary);
-    _file.peek();
-};
-template void GOST_28147_89::open<const char*>(const char*);
-template void GOST_28147_89::open<std::string&>(std::string&);
-
-void GOST_28147_89::encrypt(Method method, std::ostream& os) {
+void GOST_28147_89::encrypt(Method method, std::istream& is, std::ostream& os) {
+    _stream = &is;
     std::string s = _encrypt(method, _key);
     for (size_t i = 0; i < s.length(); ++i)
         os << s[i];
 };
 
-void GOST_28147_89::decrypt(Method method, std::ostream& os) {
+void GOST_28147_89::decrypt(Method method, std::istream& is, std::ostream& os) {
+    _stream = &is;
     std::string open_text;
     std::array<byte_t, 8> block;
     std::array<byte_t, 8> prev;
@@ -138,12 +114,35 @@ void GOST_28147_89::decrypt(Method method, std::ostream& os) {
         block = _block_cipher(reversed_key, prev);
         xored = block ^ _initialization_vector;
         open_text += _blockToString(xored);
-        while (!_file.eof()) {
+        while (!_stream->eof()) {
             cur = _read();
             block = _block_cipher(reversed_key, cur);
             xored = block ^ prev;
             prev = cur;
             open_text += _blockToString(xored);
+        }
+        break;
+    case Method::CFB:
+        prev = _read();
+        block = prev ^ _block_cipher(_key, _initialization_vector);
+        open_text += _blockToString(block);
+        while (!_stream->eof()) {
+            block = _read();
+            prev = block ^ _block_cipher(_key, prev);
+            open_text += _blockToString(prev);
+            prev = block;
+        };
+        break;
+    case Method::OFB:
+        block = _read();
+        prev = _block_cipher(_key, _initialization_vector);
+        block = block ^ prev;
+        open_text += _blockToString(block);
+        while (!_stream->eof()) {
+            block = _read();
+            prev = _block_cipher(_key, prev);
+            block = block ^ prev;
+            open_text += _blockToString(block);
         }
         break;
     default:
@@ -160,19 +159,43 @@ std::string GOST_28147_89::_encrypt(Method method, const std::array<uint32_t, 8>
     std::array<byte_t, 8> xored;
     switch (method) {
     case Method::ECB:
-        while (!_file.eof())
+        while (!_stream->eof())
             cipher_text += _blockToString(_block_cipher(__key, _read()));
+        break;
     case Method::CBC:
         block = _read();
         xored = block ^ _initialization_vector;
         prev = _block_cipher(_key, xored);
         cipher_text += _blockToString(prev);
-        while (!_file.eof()) {
+        while (!_stream->eof()) {
             block = _read();
             xored = block ^ prev;
             prev = _block_cipher(_key, xored);
             cipher_text += _blockToString(prev);
         }
+        break;
+    case Method::CFB:
+        block = _read();
+        prev = block ^ _block_cipher(_key, _initialization_vector);
+        cipher_text += _blockToString(prev);
+        while (!_stream->eof()) {
+            block = _read();
+            prev = block ^ _block_cipher(_key, prev);
+            cipher_text += _blockToString(prev);
+        }
+        break;
+    case Method::OFB:
+        block = _read();
+        prev = _block_cipher(_key, _initialization_vector);
+        block = block ^ prev;
+        cipher_text += _blockToString(block);
+        while (!_stream->eof()) {
+            block = _read();
+            prev = _block_cipher(_key, prev);
+            block = block ^ prev;
+            cipher_text += _blockToString(block);
+        }
+        break;
     default:
         break;
     }
@@ -181,9 +204,9 @@ std::string GOST_28147_89::_encrypt(Method method, const std::array<uint32_t, 8>
 
 std::array<GOST_28147_89::byte_t, 8> GOST_28147_89::_read() {
     vec_byte_t v;
-    while (!_file.eof() && v.size() < 8) {
-        _file >> std::noskipws >> v;
-        _file.peek();
+    while (!_stream->eof() && v.size() < 8) {
+        *_stream >> std::noskipws >> v;
+        _stream->peek();
     }
     while (v.size() < 8)
         v.push_back(0);

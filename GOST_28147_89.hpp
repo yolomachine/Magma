@@ -16,15 +16,11 @@ public:
     typedef unsigned char byte_t;
     typedef std::vector<byte_t> vec_byte_t;
 
-    GOST_28147_89() {};
-    GOST_28147_89(const char* file);
+    GOST_28147_89(const char* key, const char* iv);
     ~GOST_28147_89() {};
 
-    template<typename T>
-    void open(T file);
-
-    void encrypt(Method method, std::ostream& os);
-    void decrypt(Method method, std::ostream& os);
+    void encrypt(Method method, std::istream& is, std::ostream& os);
+    void decrypt(Method method, std::istream& is, std::ostream& os);
 
 private:  
     std::array<byte_t, 8> _read();
@@ -39,9 +35,9 @@ private:
     std::array<byte_t, 8> _block_cipher(const std::array<uint32_t, 8> &__key, const std::array<byte_t, 8> &text_block);
     std::string _encrypt(Method method, const std::array<uint32_t, 8> &__key);
 
-    std::ifstream _file;
+    std::istream* _stream;
     static const std::array<std::array<byte_t, 16>, 8> _s_blocks;
-    static const std::array<uint32_t, 8> _key;
-    static const std::array<byte_t, 8> _initialization_vector;
+    std::array<uint32_t, 8> _key;
+    std::array<byte_t, 8> _initialization_vector;
     bool _decrypting;
 };
